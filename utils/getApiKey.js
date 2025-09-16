@@ -1,3 +1,8 @@
+import apiKeyManager from './apiKeyManager.js';
+
 export const getApiKey = () => {
-  return process.env.SPOONACULAR_API_KEY3;
+  return apiKeyManager.getCurrentKey();
 };
+
+// Export the manager for advanced usage
+export { apiKeyManager };

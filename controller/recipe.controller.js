@@ -1,6 +1,6 @@
 import express from "express";
 import axios from "axios";
-import { getApiKey } from "../utils/getApiKey.js";
+import { getApiKey, apiKeyManager } from "../utils/getApiKey.js";
 
 const BASE_URL = "https://api.spoonacular.com";
 
@@ -16,18 +16,32 @@ export const temp = async (req, res) => {
   );
 };
 
+// Get API Key Status - for monitoring which keys are working
+export const getApiKeyStatus = async (req, res) => {
+  try {
+    const status = apiKeyManager.getStatus();
+    res.status(200).json({
+      success: true,
+      data: status,
+      message: "API key status retrieved successfully"
+    });
+  } catch (error) {
+    console.log(`Error in getApiKeyStatus: ${error}`);
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message,
+    });
+  }
+};
+
 // Test endpoint to verify API key and basic connectivity
 export const testApi = async (req, res) => {
   try {
-    const API_KEY = getApiKey();
-    console.log("=== TEST API ENDPOINT ===");
-    console.log("API_KEY:", API_KEY);
-    console.log("API_KEY exists:", !!API_KEY);
-
-    const testUrl = `${BASE_URL}/recipes/complexSearch?query=pasta&apiKey=${API_KEY}&number=1`;
+    const testUrl = `${BASE_URL}/recipes/complexSearch?query=pasta&number=1`;
     console.log("Test URL:", testUrl);
 
-    const response = await axios.get(testUrl);
+    const response = await apiKeyManager.makeRequest(testUrl);
     console.log("Test API Response Status:", response.status);
     console.log("Test API Response Data:", response.data);
 
@@ -35,7 +49,7 @@ export const testApi = async (req, res) => {
       success: true,
       message: "API test successful",
       data: response.data,
-      apiKey: API_KEY ? "Present" : "Missing",
+      apiKeyStatus: apiKeyManager.getStatus(),
       url: testUrl,
     });
   } catch (error) {
@@ -46,6 +60,7 @@ export const testApi = async (req, res) => {
       message: "API test failed",
       error: error.message,
       details: error.response?.data,
+      apiKeyStatus: apiKeyManager.getStatus(),
     });
   }
 };
@@ -53,16 +68,8 @@ export const testApi = async (req, res) => {
 // Recipe Search with filters
 export const findRecipes = async (req, res) => {
   try {
-    const API_KEY = getApiKey();
     console.log("=== BACKEND DEBUG - findRecipes START ===");
     console.log("Request query params:", req.query);
-    console.log("API_KEY from getApiKey():", API_KEY);
-    console.log("API_KEY from env:", process.env.SPOONACULAR_API_KEY);
-    console.log("API_KEY exists:", !!API_KEY);
-    console.log(
-      "API_KEY length:",
-      API_KEY ? API_KEY.length : "undefined"
-    );
 
     const {
       query,
@@ -77,9 +84,8 @@ export const findRecipes = async (req, res) => {
       number = 12,
     } = req.query;
 
-    // Build URL manually instead of using URLSearchParams
+    // Build URL without API key (manager will add it)
     let queryParams = [];
-    queryParams.push(`apiKey=${API_KEY}`);
     queryParams.push(`offset=${offset}`);
     queryParams.push(`number=${number}`);
 
@@ -93,18 +99,10 @@ export const findRecipes = async (req, res) => {
     if (minCalories) queryParams.push(`minCalories=${minCalories}`);
     if (maxCalories) queryParams.push(`maxCalories=${maxCalories}`);
 
-    const fullUrl = `${BASE_URL}/recipes/complexSearch?${queryParams.join(
-      "&"
-    )}`;
-    console.log("Full API URL:", fullUrl);
-    console.log(
-      "API Key in URL:",
-      fullUrl.includes("apiKey=") ? "Present" : "Missing"
-    );
-    console.log("Query params array:", queryParams);
+    const fullUrl = `${BASE_URL}/recipes/complexSearch?${queryParams.join("&")}`;
+    console.log("API URL (before key):", fullUrl);
 
-    const response = await axios.get(fullUrl);
-    console.log(`Final URL:${fullUrl}`);
+    const response = await apiKeyManager.makeRequest(fullUrl);
     console.log("API Response status:", response.status);
     console.log("API Response data keys:", Object.keys(response.data || {}));
     console.log("=== BACKEND DEBUG - findRecipes SUCCESS ===");
@@ -125,6 +123,7 @@ export const findRecipes = async (req, res) => {
       success: false,
       message: "Internal Server Error",
       error: error.message,
+      apiKeyStatus: apiKeyManager.getStatus(),
     });
   }
 };
@@ -133,9 +132,8 @@ export const findRecipes = async (req, res) => {
 export const getRecipeById = async (req, res) => {
   try {
     const { id } = req.params;
-    const API_KEY = getApiKey();
-    const response = await axios.get(
-      `${BASE_URL}/recipes/${id}/information?apiKey=${API_KEY}`
+    const response = await apiKeyManager.makeRequest(
+      `${BASE_URL}/recipes/${id}/information`
     );
     res.status(200).json({
       success: true,
@@ -147,6 +145,7 @@ export const getRecipeById = async (req, res) => {
       success: false,
       message: "Internal Server Error",
       error: error.message,
+      apiKeyStatus: apiKeyManager.getStatus(),
     });
   }
 };
@@ -155,14 +154,10 @@ export const getRecipeById = async (req, res) => {
 export const getRandomRecipes = async (req, res) => {
   try {
     const { number = 10, tags } = req.query;
-    const API_KEY = getApiKey();
-    const params = new URLSearchParams({
-      apiKey: API_KEY,
-      number,
-    });
-    if (tags) params.append("tags", tags);
+    let url = `${BASE_URL}/recipes/random?number=${number}`;
+    if (tags) url += `&tags=${encodeURIComponent(tags)}`;
 
-    const response = await axios.get(`${BASE_URL}/recipes/random?${params}`);
+    const response = await apiKeyManager.makeRequest(url);
     res.status(200).json({
       success: true,
       data: response.data,
@@ -173,6 +168,7 @@ export const getRandomRecipes = async (req, res) => {
       success: false,
       message: "Internal Server Error",
       error: error.message,
+      apiKeyStatus: apiKeyManager.getStatus(),
     });
   }
 };
@@ -181,10 +177,9 @@ export const getRandomRecipes = async (req, res) => {
 export const findRecipesByIngredients = async (req, res) => {
   try {
     const { ingredients, number = 10, ranking = 1 } = req.query;
-    const API_KEY = getApiKey();
-    const response = await axios.get(
-      `${BASE_URL}/recipes/findByIngredients?ingredients=${ingredients}&number=${number}&ranking=${ranking}&apiKey=${API_KEY}`
-    );
+    const url = `${BASE_URL}/recipes/findByIngredients?ingredients=${encodeURIComponent(ingredients)}&number=${number}&ranking=${ranking}`;
+    
+    const response = await apiKeyManager.makeRequest(url);
     res.status(200).json({
       success: true,
       data: response.data,
@@ -195,6 +190,7 @@ export const findRecipesByIngredients = async (req, res) => {
       success: false,
       message: "Internal Server Error",
       error: error.message,
+      apiKeyStatus: apiKeyManager.getStatus(),
     });
   }
 };
@@ -204,10 +200,9 @@ export const getSimilarRecipes = async (req, res) => {
   try {
     const { id } = req.params;
     const { number = 10 } = req.query;
-    const API_KEY = getApiKey();
-    const response = await axios.get(
-      `${BASE_URL}/recipes/${id}/similar?number=${number}&apiKey=${API_KEY}`
-    );
+    const url = `${BASE_URL}/recipes/${id}/similar?number=${number}`;
+    
+    const response = await apiKeyManager.makeRequest(url);
     res.status(200).json({
       success: true,
       data: response.data,
@@ -218,6 +213,7 @@ export const getSimilarRecipes = async (req, res) => {
       success: false,
       message: "Internal Server Error",
       error: error.message,
+      apiKeyStatus: apiKeyManager.getStatus(),
     });
   }
 };
@@ -226,10 +222,9 @@ export const getSimilarRecipes = async (req, res) => {
 export const getRecipeNutrition = async (req, res) => {
   try {
     const { id } = req.params;
-    const API_KEY = getApiKey();
-    const response = await axios.get(
-      `${BASE_URL}/recipes/${id}/nutritionWidget.json?apiKey=${API_KEY}`
-    );
+    const url = `${BASE_URL}/recipes/${id}/nutritionWidget.json`;
+    
+    const response = await apiKeyManager.makeRequest(url);
     res.status(200).json({
       success: true,
       data: response.data,
@@ -240,6 +235,7 @@ export const getRecipeNutrition = async (req, res) => {
       success: false,
       message: "Internal Server Error",
       error: error.message,
+      apiKeyStatus: apiKeyManager.getStatus(),
     });
   }
 };
@@ -248,10 +244,9 @@ export const getRecipeNutrition = async (req, res) => {
 export const getRecipePriceBreakdown = async (req, res) => {
   try {
     const { id } = req.params;
-    const API_KEY = getApiKey();
-    const response = await axios.get(
-      `${BASE_URL}/recipes/${id}/priceBreakdownWidget.json?apiKey=${API_KEY}`
-    );
+    const url = `${BASE_URL}/recipes/${id}/priceBreakdownWidget.json`;
+    
+    const response = await apiKeyManager.makeRequest(url);
     res.status(200).json({
       success: true,
       data: response.data,
@@ -262,6 +257,7 @@ export const getRecipePriceBreakdown = async (req, res) => {
       success: false,
       message: "Internal Server Error",
       error: error.message,
+      apiKeyStatus: apiKeyManager.getStatus(),
     });
   }
 };
@@ -270,10 +266,9 @@ export const getRecipePriceBreakdown = async (req, res) => {
 export const getRecipeInstructions = async (req, res) => {
   try {
     const { id } = req.params;
-    const API_KEY = getApiKey();
-    const response = await axios.get(
-      `${BASE_URL}/recipes/${id}/analyzedInstructions?apiKey=${API_KEY}`
-    );
+    const url = `${BASE_URL}/recipes/${id}/analyzedInstructions`;
+    
+    const response = await apiKeyManager.makeRequest(url);
     res.status(200).json({
       success: true,
       data: response.data,
@@ -284,6 +279,7 @@ export const getRecipeInstructions = async (req, res) => {
       success: false,
       message: "Internal Server Error",
       error: error.message,
+      apiKeyStatus: apiKeyManager.getStatus(),
     });
   }
 };
@@ -292,20 +288,13 @@ export const getRecipeInstructions = async (req, res) => {
 export const generateMealPlan = async (req, res) => {
   try {
     const { timeFrame = "day", targetCalories, diet, exclude } = req.query;
-    const API_KEY = getApiKey();
+    let url = `${BASE_URL}/mealplanner/generate?timeFrame=${timeFrame}`;
+    
+    if (targetCalories) url += `&targetCalories=${targetCalories}`;
+    if (diet) url += `&diet=${encodeURIComponent(diet)}`;
+    if (exclude) url += `&exclude=${encodeURIComponent(exclude)}`;
 
-    const params = new URLSearchParams({
-      apiKey: API_KEY,
-      timeFrame,
-    });
-
-    if (targetCalories) params.append("targetCalories", targetCalories);
-    if (diet) params.append("diet", diet);
-    if (exclude) params.append("exclude", exclude);
-
-    const response = await axios.get(
-      `${BASE_URL}/mealplanner/generate?${params}`
-    );
+    const response = await apiKeyManager.makeRequest(url);
     res.status(200).json({
       success: true,
       data: response.data,
@@ -316,6 +305,7 @@ export const generateMealPlan = async (req, res) => {
       success: false,
       message: "Internal Server Error",
       error: error.message,
+      apiKeyStatus: apiKeyManager.getStatus(),
     });
   }
 };
@@ -324,15 +314,11 @@ export const generateMealPlan = async (req, res) => {
 export const getWinePairing = async (req, res) => {
   try {
     const { food, maxPrice } = req.query;
-    const API_KEY = getApiKey();
-    const params = new URLSearchParams({
-      apiKey: API_KEY,
-      food,
-    });
+    let url = `${BASE_URL}/food/wine/pairing?food=${encodeURIComponent(food)}`;
+    
+    if (maxPrice) url += `&maxPrice=${maxPrice}`;
 
-    if (maxPrice) params.append("maxPrice", maxPrice);
-
-    const response = await axios.get(`${BASE_URL}/food/wine/pairing?${params}`);
+    const response = await apiKeyManager.makeRequest(url);
     res.status(200).json({
       success: true,
       data: response.data,
@@ -343,29 +329,7 @@ export const getWinePairing = async (req, res) => {
       success: false,
       message: "Internal Server Error",
       error: error.message,
-    });
-  }
-};
-
-// Analyze Recipe Nutrition
-export const analyzeRecipeNutrition = async (req, res) => {
-  try {
-    const { title, servings, ingredients } = req.body;
-    const API_KEY = getApiKey();
-    const response = await axios.post(
-      `${BASE_URL}/recipes/analyze?apiKey=${API_KEY}`,
-      { title, servings, ingredients }
-    );
-    res.status(200).json({
-      success: true,
-      data: response.data,
-    });
-  } catch (error) {
-    console.log(`Error in analyzeRecipeNutrition: ${error}`);
-    res.status(500).json({
-      success: false,
-      message: "Internal Server Error",
-      error: error.message,
+      apiKeyStatus: apiKeyManager.getStatus(),
     });
   }
 };
@@ -374,17 +338,9 @@ export const analyzeRecipeNutrition = async (req, res) => {
 export const searchFoodVideos = async (req, res) => {
   try {
     const { query, type = "main course", number = 10 } = req.query;
-    const API_KEY = getApiKey();
-    const params = new URLSearchParams({
-      apiKey: API_KEY,
-      query,
-      type,
-      number,
-    });
+    let url = `${BASE_URL}/food/videos/search?query=${encodeURIComponent(query)}&type=${encodeURIComponent(type)}&number=${number}`;
 
-    const response = await axios.get(
-      `${BASE_URL}/food/videos/search?${params}`
-    );
+    const response = await apiKeyManager.makeRequest(url);
     res.status(200).json({
       success: true,
       data: response.data,
@@ -395,6 +351,62 @@ export const searchFoodVideos = async (req, res) => {
       success: false,
       message: "Internal Server Error",
       error: error.message,
+      apiKeyStatus: apiKeyManager.getStatus(),
+    });
+  }
+};
+
+// Analyze Recipe Nutrition
+export const analyzeRecipeNutrition = async (req, res) => {
+  try {
+    const { title, servings, ingredients } = req.body;
+    
+    // For POST requests, we'll handle API key rotation manually for now
+    let lastError = null;
+    let attempts = 0;
+    const maxAttempts = 3; // Try a few keys
+    
+    while (attempts < maxAttempts) {
+      try {
+        const API_KEY = apiKeyManager.getCurrentKey();
+        const response = await axios.post(
+          `${BASE_URL}/recipes/analyze?apiKey=${API_KEY}`,
+          { title, servings, ingredients }
+        );
+        
+        res.status(200).json({
+          success: true,
+          data: response.data,
+        });
+        return;
+        
+      } catch (error) {
+        lastError = error;
+        
+        // If it's a rate limit error, try next key
+        if (error.response?.status === 402 || error.response?.status === 429) {
+          console.log(`POST request failed with key ${apiKeyManager.currentKeyIndex}, rotating...`);
+          apiKeyManager.handleApiError(error);
+          apiKeyManager.rotateToNextKey();
+          attempts++;
+          continue;
+        }
+        
+        // For other errors, break immediately
+        break;
+      }
+    }
+    
+    // If we get here, all attempts failed
+    throw lastError;
+    
+  } catch (error) {
+    console.log(`Error in analyzeRecipeNutrition: ${error}`);
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message,
+      apiKeyStatus: apiKeyManager.getStatus(),
     });
   }
 };

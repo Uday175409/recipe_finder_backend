@@ -13,13 +13,17 @@ import {
   getWinePairing,
   analyzeRecipeNutrition,
   searchFoodVideos,
-  temp
+  temp,
+  getApiKeyStatus
 } from "../controller/recipe.controller.js";
 
 const router = express.Router();
 router.get("/temp", temp);
 // Test endpoint
 router.get("/test", testApi);
+
+// API Key Status endpoint
+router.get("/api-status", getApiKeyStatus);
 
 // Recipe Search & Discovery
 router.get("/search", findRecipes);
