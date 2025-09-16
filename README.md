@@ -213,16 +213,42 @@ npm run dev
 
 ## 🚀 Deployment
 
-### Environment Setup
-1. Set environment variables on your hosting platform
-2. Ensure all API keys are valid and have sufficient quota
-3. Configure PORT for your hosting service
+### Vercel Deployment (Recommended)
 
-### Recommended Hosting
+This backend is optimized for Vercel serverless deployment:
+
+1. **Install Vercel CLI**:
+   ```bash
+   npm install -g vercel
+   ```
+
+2. **Deploy to Vercel**:
+   ```bash
+   vercel
+   ```
+
+3. **Set Environment Variables** in Vercel dashboard:
+   - `SPOONACULAR_API_KEY_1=your_first_api_key`
+   - `SPOONACULAR_API_KEY_2=your_second_api_key`
+   - `SPOONACULAR_API_KEY_3=your_third_api_key`
+   - `SPOONACULAR_API_KEY_4=your_fourth_api_key`
+   - `CURRENCY_API_KEY=your_currency_api_key`
+
+4. **Configuration Files**:
+   - `index.js` - Vercel entry point (serverless function)
+   - `vercel.json` - Deployment configuration with 30s timeout
+   - `.vercelignore` - Excludes unnecessary files
+
+### Other Hosting Options
 - **Heroku** - Easy deployment with environment variables
 - **Railway** - Modern hosting with git integration
 - **DigitalOcean App Platform** - Scalable with monitoring
 - **AWS EC2** - Full control and customization
+
+### Environment Setup
+1. Set environment variables on your hosting platform
+2. Ensure all API keys are valid and have sufficient quota
+3. For Vercel: Use the dashboard or `vercel env` commands
 
 ### Health Monitoring
 Monitor these endpoints in production:
